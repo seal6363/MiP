@@ -61,3 +61,10 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots
 fastlane/test_output
+
+# node_modules
+#
+# Since all the required libs should be defined in the package.json
+# and can be installed using 'npm install'
+
+**/node_modules/
