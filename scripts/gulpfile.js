@@ -1,5 +1,7 @@
 var gulp = require('gulp');
 var dest = require('gulp-dest');
+var ts = require('gulp-typescript');
+var merge = require('merge2');
 var path = require('path');
 var util = require('util');
 var requirePostfixUpdator = require('gulp-ojbridge').requirePostfixModifier;
@@ -8,12 +10,34 @@ var encrypt = require('gulp-ojbridge').encrypt;
 const EXAMPLE_APP_PATH = '../OJBDevicePlayground';
 const POD_SOURCE_PATH = 'encrypted';
 const PASSWORD = '123fartasvfdfhasrtasef';
+const TS_DEFINITIONS = './release/definitions'
+const TS_RESULT_DEST = './release/js'
+
+gulp.task('scripts', function() {
+    
+    var tsResults = gulp.src('*.ts')
+    .pipe(ts({
+        declarationFiles: true,
+        noExternalResolve: true,
+        noImplicitAny: true,
+        out: 'microbit.js'
+    }));
+    
+    return merge([
+        tsResults.dts.pipe(gulp.dest(TS_DEFINITIONS)),
+        tsResults.js.pipe(gulp.dest(TS_RESULT_DEST))
+    ]);
+})
 
 // Setup the watch event:
 
-gulp.task('watch', () => {
+gulp.task('watch', function() {
+    
+    // setup the typescript task:
+    gulp.watch('*.ts', ['scripts']);
 
-    gulp.watch(['*.js', '!gulpfile.js'], (event) => {
+    // setup the encryption task:
+    gulp.watch(util.format('%s/*.js', TS_RESULT_DEST), function(event) {
 
         if (event.type != 'changed') {
             return;
@@ -23,7 +47,7 @@ gulp.task('watch', () => {
         var destName = util.format('%s.es', path.parse(event.path).name);
         
         console.log('working on: ' + sourceName);
-        return gulp.src(sourceName, {})
+        return gulp.src(event.path, {})
         .pipe(gulp.dest(EXAMPLE_APP_PATH))
         .pipe(requirePostfixUpdator('es'))
         .pipe(encrypt(PASSWORD))
