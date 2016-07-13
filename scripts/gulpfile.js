@@ -15,13 +15,9 @@ const TS_RESULT_DEST = './release/js'
 
 gulp.task('scripts', function() {
     
+    var tsProject = ts.createProject('tsconfig.json');
     var tsResults = gulp.src('*.ts')
-    .pipe(ts({
-        declarationFiles: true,
-        noExternalResolve: true,
-        noImplicitAny: true,
-        out: 'microbit.js'
-    }));
+    .pipe(ts(tsProject));
     
     return merge([
         tsResults.dts.pipe(gulp.dest(TS_DEFINITIONS)),

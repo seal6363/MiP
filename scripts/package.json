@@ -1,10 +1,15 @@
 {
-    "dependencies": {
-        "gulp-ojbridge": "git+ssh://git@bitbucket.org:wantoto/gulp-ojbridge.git",
-        "gulp-dest": "^0.2.3",
-        "gulp-shell": "^0.5.2",
-        "q": "^1.4.1",
-        "gulp-typescript": "^2.13.0",
-        "merge2": "^1.0.2"
-    }
+  "dependencies": {
+    "events": "^1.1.1",
+    "noble": "^1.6.0",
+    "q": "^1.4.1"
+  },
+  "devDependencies": {
+    "gulp": "^3.9.1",
+    "gulp-ojbridge": "git+ssh://git@bitbucket.org:wantoto/gulp-ojbridge.git",
+    "gulp-dest": "^0.2.3",
+    "gulp-shell": "^0.5.2",
+    "gulp-typescript": "^2.13.0",
+    "merge2": "^1.0.2"
+  }
 }

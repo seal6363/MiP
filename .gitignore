@@ -68,3 +68,4 @@ fastlane/test_output
 # and can be installed using 'npm install'
 
 **/node_modules/
+**/typings/
