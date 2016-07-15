@@ -6,7 +6,7 @@
   },
   "devDependencies": {
     "gulp": "^3.9.1",
-    "gulp-ojbridge": "git+ssh://git@bitbucket.org:wantoto/gulp-ojbridge.git",
+    "gulp-ojbridge": "git+ssh://git@github.com:tickleapp/gulp-ojbridge.git",
     "gulp-dest": "^0.2.3",
     "gulp-shell": "^0.5.2",
     "gulp-typescript": "^2.13.0",
