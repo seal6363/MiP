@@ -49,23 +49,11 @@ class Device {
 	static SEND_DATA_UUID = 'ffe9';
 	static RECEIVE_DATA_UUID= 'ffe4';
     static BATTERY_LEVEL_UUID = '2a19';
-   // static RSSI_REPORT_UUID = 'FFA0';
-    //static DEVICE_INFO_UUID = '180A';
-    //static DEVICE_SETTING_UUID = 'FF10';
-    //static DFU_UUID = 'FF30';
-    //static MODULE_PARAMETER_UUID = 'FF90';
-    //static NUVOTON_BOOTLOADER_UUID = 'FF00';
  
     static supportedServices = [
         Device.SEND_DATA,
 		Device.RECEIVE_DATA,
 	    Device.BATTERY_LEVEL
-	    //Device.RSSI_REPORT_UUID,
-	    //Device.DEVICE_INFO_UUID,
-	    //Device.DEVICE_SETTING_UUID,
-	    //Device.DFU_UUID,
-	    //Device.MODULE_PARAMETER_UUID,
-	    //Device.NUVOTON_BOOTLOADER_UUID
         ];
 
 	// charac
@@ -89,10 +77,10 @@ class Device {
     disconnected: boolean = false;
     initialized: boolean = false;
     radar_mode: boolean = false;
-    get_status: boolean = false;
     MiPstatus: any = null;
     MiPweight: any = null;
 	constants: JSON = JSON.parse(fs.readFileSync('../../constants.json', 'utf8'));
+    commands: JSON = this.constants.COMMAND_CODE;
     received: boolean = false;
     
 
@@ -103,12 +91,6 @@ class Device {
         return this.SendDataCharac != null &&
 		this.ReceiveDataCharac != null &&
 		this.BatteryLevelCharac != null;
-		//this.RssiReportCharac != null &&
-		//this.DeviceInfoCharac != null &&
-		//this.DeviceSettingCharac != null &&
-		//this.DfuCharac != null &&
-		//this.ModuleParameterCharac != null &&
-		//this.NuvotonBootloaderCharac != null;
     }
 
     toString(): String {
@@ -127,30 +109,23 @@ class Device {
         console.log('device initialized');
         device.receive(peripheral);
         var i = 0;
-        /*var promises = [];
-        device.READING_CONSTANTS.forEach(function (name, i) {
-            promises.push(q.Promise(function (resolve: () => void, reject: any) {
-                device.GET_STUFF(peripheral, device.READING_CONSTANTS[i]);
-                if (device.received) {
-                    resolve();
-                    console.log(device.received);
-                }
-            }));
-        });
-        q.all(promises).then(function(){console.log("empty success")}).catch(function() {console.log("fail");});*/
-        var reading = function () {
-            console.log("reading");
-            if (i >= device.READING_CONSTANTS.length) {
-                i = 0;
-            }
-            device.GET_STUFF(peripheral, device.READING_CONSTANTS[i]);
-            i++;
-        }
-
-       var timer = setInterval(reading, 1000);
 
         device.listCommands();
-        //device.prepareCommands(peripheral);
+    }
+
+    getAllInformation(peripheral: noble.Peripheral): any {
+        var device = this;
+        device.GET_STUFF(peripheral, "GET_GAME_MDOE");
+        device.GET_STUFF(peripheral, "GET_CHEST_RGB_LED");
+        device.GET_STUFF(peripheral, "GET_HEAD_LED");
+        device.GET_STUFF(peripheral, "GET_ODEMETER");
+        device.GET_STUFF(peripheral, "GET_RADAR_MODE");
+        device.GET_STUFF(peripheral, "GET_DETECTION_MODE");
+        device.GET_STUFF(peripheral, "GET_IR_REMOTE_ONOFF");
+        device.GET_STUFF(peripheral, "GET_CLAPS_DETECTION_STATUS");
+        device.GET_STUFF(peripheral, "GET_USER_DATA");
+        device.GET_STUFF(peripheral, "GET_SOFTWARE_VERSION");
+        device.GET_STUFF(peripheral, "GET_HARDWARE_VERSION");
     }
 
     receive(peripheral: noble.Peripheral): any {
@@ -164,67 +139,95 @@ class Device {
             for (var i=0; i<str.length; i+=2) {
                 convert.push(parseInt("0x"+str.substr(i, 2)));
             }
-            if(device.get_status && convert[0] == 121) {
+            if(convert[0] == 121) {
                 device.MiPstatus = convert;
                 console.log("print status");
-                device.get_status = false;
+                console.log('"ON_BACK": 0, "FACEDOWN": 1, "UP_RIGHT": 2, "PICKED_UP": 3, "HANDSTAND": 4, "FACEDOWN_TRAY": 5, "BACK_WITH_KICKSTAND": 6"');
+                console.log("battery level: " + convert[1] + " (77-124) mip position: " + convert[2]);
+                device.MiPstatus = convert[1];
             } else if (convert[0] == 129) {
                 device.MiPweight = convert;
                 console.log("print weight");
+                console.log("0xD3(-45 degree) - 0x2D(+45 degree) * 0xD3 (211) (max)~0xFF(min) (255) is holding the weight on the front * 0x00(min)~0x2D(max) is holding the weight on the back");
+                console.log(convert[1]);
             } else if (convert[0] == 120) {
                 console.log("print game mode");
             } else if (convert[0] == 131) {
                 console.log("print chest LED");
+                console.log("red: " + convert[1] + " green: " + convert[2] + " blue: " + convert[3] + " on(ms): " + convert[4] * 20 + " off(ms): " + convert[5] * 20);
             } else if (convert[0] == 139) {
                 console.log("print head LED");
+                console.log("0=off, 1=on, 2=blink slow, 3=blink fast, 4=fade in");
+                console.log("light1: " + convert[1] + " light2: " + convert[2] + " light3: " + convert[3] + " light4: " + convert[4]);
+                
             } else if (convert[0] == 133) {
                 console.log("print odometer");
-            } 
+                console.log(data[1]);
+                console.log(convert[1]);
+                
+            } else if (convert[0] == 10) {
+                console.log("print gesture detected");
+                console.log("left: A, right, B, center sweep left: C, center sweep right: D, center hold: E, forward: F, back: 10");
+                console.log(str.substr(i, 2));
+            } else if (convert[0] == 13) {
+                console.log("print gesture radar mode status");
+                if (convert[1] == 1) {
+                    console.log("disble gesture and radar");
+                } else if (convert[1] == 2) {
+                    console.log("gesture mode on");
+                } else if (convert[1] == 4) {
+                    console.log("radar mode on");
+                }           
+            } else if (convert[0] == 12) {
+                console.log("print radar response")
+                if (convert[1] == 1) {
+                    console.log("no object or object disappear");
+                } else if (convert[1] == 2) {
+                    console.log("see object in 10-30 cm");
+                } else if (convert[1] == 3) {
+                    console.log("see object within 10 cm");
+                }
+            } else if (convert[0] == 15) {
+                console.log("print detection mode");
+                console.log("detection on " + convert[1]);
+                console.log("IR Tx power: " + convert[2]);
+            } else if (convert[0] == 26) {
+                console.log("print shake detected");
+            } else if (convert[0] == 17) {
+                console.log("print IR control status");
+                console.log(convert[1]);
+            } else if (convert[0] == 250) {
+                console.log("print sleep");
+            } else if (convert[0] == 22) {
+                console.log("print volume level");
+                console.log(convert[1]);
+            } else if (convert[0] == 29) {
+                console.log("print clap detected time");
+                console.log(convert[1]);
+            } else if (convert[0] == 31) {
+                console.log("print clap status");
+                console.log("on: " + convert[1] + " delay time between claps: " + convert[2]);
+            } else if (convert[0] == 19) {
+                console.log("print user data");
+                console.log("user data address: " + convert[1] + " , " + convert[2]);
+            } else if (convert[0] == 20) {
+                console.log("print software version");
+                console.log({"year": convert[1], "month": convert[2], "date": convert[3], "#": convert[4]});
+            } else if (convert[0] == 25) {
+                console.log("print hardware version");
+                console.log({"voice_chip": convert[1], "hardware_version": convert[2]});
+            }
             console.log(convert);
             device.received = true;
 		});
     }
 
     listCommands(): void {
-        var command_code = Object.keys(this.constants.COMMAND_CODE);
+        var command_code = Object.keys(this.commands);
 
         for (var i = 0; i < command_code.length; i++) {
             console.log(i + ": " command_code[i]);
         }
-    }
-
-    prepareCommands(peripheral: noble.Peripheral): void {
-        var device = this;
-
-        device.requestCommands(function (index: number, selectedOption: number) {
-            var args = [selectedOption];
-            if (selectedOption == 21) {
-                                    device.DRIVE_TIME(peripheral, false, 20, 30);
-
-                //device.DRIVE_FIXED(peripheral, false, 20, true, 90)
-                //device.USER_SET_VOLUME_LEVEL(peripheral, args);
-            } else if (selectedOption == 6) {
-                device.USER_PLAY_SOUND(peripheral, args);
-            } else if (selectedOption == 112) {
-                device.USER_DRIVE_FIXED(peripheral, args);
-            }
-        })
-    } 
-
-    requestCommands(callback: any): void {
-        var command_code = this.constants.COMMAND_CODE;
-        var selectedOption;
-
-        rl.question("which one: ", function(ans: number): any {
-            var selectedOption = command_code[ans].value;
-            if (selectedOption != null) {
-                console.log("valid option");
-                callback (ans, selectedOption);
-            } else {
-                throw new DeviceError(DeviceError.INVALID_ARGUMENT, "invalid argument");
-
-            }
-        });
     }
 
     giveCommands(peripheral: noble.Peripheral, args: number[]): any {
@@ -239,34 +242,17 @@ class Device {
             if (error) {
                 throw new DeviceError(DeviceError.UNEXPECTED_ERROR, "write error: " + error);
             }
-            //device.prepareCommands(peripheral);
         });
     }    
-//////READ....
-
-    READING_CONSTANTS: String[] = ["GET_STATUS", "GET_WEIGHT_LEVEL", "GET_GAME_MDOE", "GET_CHEST_RGB_LED", "GET_HEAD_LED",
-    "GET_ODEMETER", "GET_RADAR_MODE", "GET_DETECTION_MODE", "OTHER_MIP_DETECTED", "SHAKE_DETECTED"/* detect automatically*/,
-    "GET_IR_REMOTE_ONOFF", "GET_USER_DATA", "GET_VOLUME_LEVEL", "RECEIVE_IR_COMMAND", "CLAPS_DETECTED", "GET_CLAPS_DETECTION_STATUS"];
 
 
     GET_STUFF(peripheral: noble.Peripheral, type: String): any {
         var device = this;
-        var command_code = this.constants.COMMAND_CODE;
-        var value = command_code[type];
+        var value = device.commands[type];
 
         device.giveCommands(peripheral, [value]);
     }
 
-    
-
-
-////// Can't find
-    GET_RADAR_RESPONSE(peripheral: noble.Peripheral) {
-        var device = this;
-        if (device.radar_mode) {
-            device.giveCommands(peripheral, [12])
-        }
-    }
 
     // volume level: 0-7
     SET_VOLUME_LEVEL(peripheral: noble.Peripheral, level: number): any {
@@ -281,7 +267,8 @@ class Device {
             level = 7;
         }
         console.log("set volume");
-        device.giveCommands(peripheral, [21, level]);
+        device.giveCommands(peripheral, [device.commands["SET_VOLUME_LEVEL"], level]);
+        device.GET_STUFF(peripheral, "GET_VOLUME_LEVEL");
     }
 
     PLAY_SOUND(peripheral: noble.Peripheral, file: number, time: number): any {
@@ -307,7 +294,8 @@ class Device {
             time = 256;
         }
         console.log("play sound");
-        device.giveCommands(peripheral, [6, file, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, time]);
+        device.giveCommands(peripheral, [device.commands["PLAY_SOUND"], file, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, time]);
+    
     }
     
     DRIVE_FIXED(peripheral: noble.Peripheral, backward: boolean, distance: number, clockwise: boolean, angle: number): any {
@@ -339,7 +327,7 @@ class Device {
             low_byte = angle - 255;
         }
         console.log("drive fixed distance")
-        device.giveCommands(peripheral, [112, direction, distance, turn_direction, high_byte, low_byte]);
+        device.giveCommands(peripheral, [device.commands["DRIVE_FIXED_DISTANCE"], direction, distance, turn_direction, high_byte, low_byte]);
     }
 
     DRIVE_TIME(peripheral: noble.Peripheral, backward: boolean, speed: number, time: number): any {
@@ -404,7 +392,7 @@ class Device {
         }
 
         console.log("drive continuously");
-        device.giveCommands(peripheral, [120, direction_with_speed, spin]);
+        device.giveCommands(peripheral, [device.commands["DRIVE_CONTINOUS"], direction_with_speed, spin]);
 
     }
 
@@ -417,7 +405,7 @@ class Device {
             face = 1;
         }
         console.log("set position");
-        device.giveCommands(peripheral, [8, face]);
+        device.giveCommands(peripheral, [device.commands["SHOULD_FALLOVER"], face]);
     }
 
     // Mip will attempt to get up from front or back if angle is correct
@@ -434,7 +422,7 @@ class Device {
             direction = 1;
         }
         console.log("get up");
-        device.giveCommands(peripheral, [35, direction]);
+        device.giveCommands(peripheral, [device.commands["GET_UP_FROM_POSITION"], direction]);
     }
 
     TURN(peripheral: noble.Peripheral, right: boolean, angle: number, speed: number): any {
@@ -475,7 +463,8 @@ class Device {
             blue = 255;
         }
         console.log("change chest light");
-        device.giveCommands(peripheral, [132, red, green, blue]);
+        device.giveCommands(peripheral, [device.commands["SET_CHEST_RGB_LED"], red, green, blue]);
+        device.GET_STUFF(peripheral, "GET_CHEST_RGB_LED");
     }
 
     // onTime and offTime in ms
@@ -491,10 +480,10 @@ class Device {
         }
        
         console.log("change chest light");
-        device.giveCommands(peripheral, [137, red, green, blue, onTime / 20, offTime / 20]);        
+        device.giveCommands(peripheral, [device.commands["FLASH_CHEST_RGB_LED"], red, green, blue, onTime / 20, offTime / 20]);        
     }
 
-    //0=off, 1=on, 2=blink slow, 3=blink fast
+    //0=off, 1=on, 2=blink slow, 3=blink fast, 4=fade in
     SET_HEAD_LED(peripheral: noble.Peripheral, light1: number, light2: number, light3: number, light4: number) {
         var device = this;
         for (var i = 1; i < arguments.length; i++) {
@@ -505,14 +494,15 @@ class Device {
             }
         }
         console.log("set head light");
-        device.giveCommands(peripheral, [138, light1, light2, light3, light4]);        
-
+        device.giveCommands(peripheral, [device.commands["SET_HEAD_LED"], light1, light2, light3, light4]);        
+        device.GET_STUFF(peripheral, "GET_HEAD_LED");
     }
 
     RESET_ODEMETER(peripheral: noble.Peripheral) {
         var device = this;
         console.log("reset odometer");
-        device.giveCommands(peripheral, [134]);
+        device.giveCommands(peripheral, [device.commands["RESET_ODEMETER"]]);
+        device.GET_STUFF(peripheral, "GET_ODEMETER");
     }
 
     // either gesture mode or radar mode can be turn on
@@ -528,7 +518,8 @@ class Device {
         } else {
             console.log("disable gesture and radar");
         }
-        device.giveCommands(peripheral, [13, value]);
+        device.giveCommands(peripheral, [device.commands["SET_GESTURE_RADAR_MODE"], value]);
+        device.GET_STUFF(peripheral, "GET_RADAR_MODE");
     }
 
     // Tu turn off dection mode, pass id with 0
@@ -546,7 +537,8 @@ class Device {
             id = 120;
         }
         console.log("set dection mode");
-        device.giveCommands(peripheral, [14, id, power]);
+        device.giveCommands(peripheral, [device.commands["SET_DETECTION_MODE"], id, power]);
+        device.GET_STUFF(peripheral, "GET_DETECTION_MODE");
     }
 
     SET_IR_REMOTE_ONOFF(peripheral: noble.Peripheral, on: boolean) {
@@ -556,7 +548,8 @@ class Device {
             value = 1;
         }
         console.log("set IR remote");
-        device.giveCommands(peripheral, [16, value]);
+        device.giveCommands(peripheral, [device.commands["SET_IR_REMOTE_ONOFF"], value]);
+        device.GET_STUFF(peripheral, "GET_IR_REMOTE_ONOFF");
     }
 
     SET_CLAPS_DETECTION_STATUS(peripheral: noble.Peripheral, on: boolean) {
@@ -566,7 +559,7 @@ class Device {
             value = 1;
         }
         console.log("set clap dection");
-        device.giveCommands(peripheral, [30, value]);
+        device.giveCommands(peripheral, [device.commands["SET_CLAPS_DETECTION_STATUS"], value]);
     }
     // set delay time between two claps
     SET_CLAPS_DETECTION_TIMING(peripheral: noble.Peripheral, time: number) {
@@ -578,119 +571,26 @@ class Device {
             low = time - 255;   
         } 
         console.log("set delay time between two claps");
-        device.giveCommands(peripheral, [32, high, low]);
+        device.giveCommands(peripheral, [device.commands["SET_CLAPS_DETECTION_TIMING"], high, low]);
+        device.GET_STUFF(peripheral, "GET_CLAPS_DETECTION_STATUS");
     }
 
     STOP(peripheral: noble.Peripheral) {
         var device = this;
 
         console.log("stop");
-        device.giveCommands(peripheral, [119]);
+        device.giveCommands(peripheral, [device.commands["STOP"]]);
     }
 
-    
-    
-
-
 // not ready for tickle
+//"APP": 1, "CAGE": 2, "TRACKING": 3, "DANCE": 4, "DEFAULT": 5, "STACK": 6, "TRICK": 7, "ROAM": 8
     SET_GAME_MODE(peripheral: noble.Peripheral, option: number): any {
         var device = this;
 
         console.log("set mode");
-        device.giveCommands(peripheral, [118, option]);
+        device.giveCommands(peripheral, [device.commands["SET_GAME_MODE"], option]);
+        device.GET_STUFF(peripheral, "GET_GAME_MDOE");
     }
-
-/////////////////// USER PROMPT VERSION ///////////////////////
-    USER_SET_VOLUME_LEVEL(peripheral: noble.Peripheral, args: number[]): any {
-        var device = this;
-
-        rl.question("Set volume level to (0-7) ", function (ans: any): any {
-            ans = parseInt(ans);
-            if (typeof(ans) != "number") {
-                throw new DeviceError(DeviceError.INVALID_ARGUMENT, "invalid argument");
-            }
-
-            if (ans < 0) {
-                ans = 0;
-            } else if (ans > 7) {
-                ans = 7;
-            }
-            args.push(ans);
-            device.giveCommands(peripheral, args);
-        });
-    }
-
-    USER_PLAY_SOUND(peripheral: noble.Peripheral, args: number[]): any {
-        var device = this;
-
-        rl.question("Play what sound? ", function (ans: any) {
-            ans = parseInt(ans);
-            if (typeof(ans) != "number") {
-                throw new DeviceError(DeviceError.INVALID_ARGUMENT, 'invalid argument');
-            }
-
-            if (ans < 1 || ans > 106) {
-                ans = 1;
-            } 
-            args.push(ans);
-
-            for (var i = 0; i < 15; i++) {
-            args.push(0);
-            }
-
-            rl.question("Play how many times? (1-256) ", function (ans: any) {
-                ans = parseInt(ans);
-                if (typeof(ans) != "number") {
-                    throw new DeviceError(DeviceError.INVALID_ARGUMENT, "invalid argument");
-                }
-
-                if (ans < 1) {
-                    ans = 1;
-                } else if (ans > 256) {
-                    ans = 256;
-                }
-                args.push(ans - 1);
-                device.giveCommands(peripheral, args);
-
-            });
-        });
-    }
-
-    USER_DRIVE_FIXED(peripheral: noble.Peripheral, args: number[]): any {
-        var device = this;
-
-        rl.question("Drive forward or backward? (f or b) ", function (ans: String) {
-            
-            if (ans == 'f') {
-                args.push(0);
-            } else if (ans == 'b') {
-                args.push(1);
-            } else {
-                throw new DeviceError(DeviceError.INVALID_ARGUMENT, "invalid argument");
-            }
-
-            rl.question("Distance (0-255 cm)", function (ans: any) {
-                ans = parseInt(ans);
-                if (typeof(ans) != "number") {
-                    throw new DeviceError(DeviceError.INVALID_ARGUMENT, "invalid argument");
-                }
-
-                if (ans < 0) {
-                    ans = 0;
-                } else if (ans > 255) {
-                    ans = 255;
-                }
-                args.push(ans);
-                for (var i = 0; i < 3; i++) {
-                    args.push(0);
-                }
-                device.giveCommands(peripheral, args);
-                
-            }); 
-        });
-    }
-////\\\\\\\\\\\\\\ USER PROMPT VERSION \\\\\\\\\\\\\\\\\\\\\\
-    
     
     promiseReadDataFromCharacteristic(peripheral: noble.Peripheral, service: noble.Service): any {
         var device = this;
@@ -765,10 +665,6 @@ class Device {
     }
 }
 
-    
-
-
-
     noble.on(`stateChange`, function (state: String): void {
         console.log("state changed with value: " + state);
         if (state == 'poweredOn') {
@@ -780,8 +676,6 @@ class Device {
     });
 	
 	noble.on(`discover`, function (peripheral: noble.Peripheral): void {
-        console.log('Got device');
-
         if (Device.getProductId(peripheral) != Device.PRODUCT_ID) {
             return;
         };
@@ -799,7 +693,9 @@ class Device {
                 console.log('connected to peripheral: ' + peripheral.uuid);
                 Device.deviceWithPeripheral(peripheral, function(device: Device){
                     console.log("success");
-                    device.SET_CHEST_RGB_LED(peripheral, 255, 0, 0);
+                    setTimeout(function() {
+                        //device.getAllInformation(peripheral);
+                    }, 5000);
                 }, 
                     function(peripheral: noble.Peripheral, error: number) {
                     throw new DeviceError(error, "fail to connect");

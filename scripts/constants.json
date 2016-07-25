@@ -4,6 +4,7 @@
 		"GET_IR_REMOTE_ONOFF": 17,
 
 		"SET_GESTURE_RADAR_MODE": 12,
+		"RADAR_RESPONSE": 12,
 		"GET_RADAR_MODE": 13,
 
 		"SET_DETECTION_MODE": 14,
@@ -88,6 +89,16 @@
 		"BW_SPEED1": 32,
 		"LEFT_SPEED1": 96,
 		"RIGHT_SPEED1": 64
+	},
+	"GAME_MODE": {
+		"APP": 1,
+		"CAGE": 2,
+		"TRACKING": 3,
+		"DANCE": 4,
+		"DEFAULT": 5,
+		"STACK": 6,
+		"TRICK": 7,
+		"ROAM": 8
 	},
  	"SOUND_FILE": {
 		"ONEKHZ_500MS_8K16BIT": 1,
