@@ -3,10 +3,11 @@
 // import noble = require('noble');
 
 import noble = require('noble');
-
 import fs = require('fs');
 import promise = require('bluebird');
 import readline = require('readline');
+
+
 var rl = readline.createInterface({input: process.stdin, output: process.stdout});
 
 
@@ -79,6 +80,7 @@ class Device {
     radar_mode: boolean = false;
     MiPstatus: any = null;
     MiPweight: any = null;
+    obstacle: number = 0;
 	constants: JSON = JSON.parse(fs.readFileSync('../../constants.json', 'utf8'));
     commands: JSON = this.constants.COMMAND_CODE;
     received: boolean = false;
@@ -97,7 +99,7 @@ class Device {
         return `MiP: ${this.name}`;
     }
 
-    initialize(peripheral: noble.Peripheral): void {
+    initialize(): void {
         var device = this;
 
 		if (device.initialized) {
@@ -107,28 +109,27 @@ class Device {
 
 		device.initialized = true;
         console.log('device initialized');
-        device.receive(peripheral);
-        var i = 0;
-
-        device.listCommands();
+        device.receive();
+        
+        var p = new promise(function(resolve, reject) {
+            resolve();
+        });
+        p.delay(1000).then(
+            function() {device.SET_IR_REMOTE_ONOFF(true);}
+        ).delay(500).then(
+            function() {device.RESET_ODEMETER();}
+        ).delay(500).then(
+            function() {device.SET_VOLUME_LEVEL(4);}
+        ).delay(500).then(
+            function() {device.SET_GESTURE_RADAR_MODE(false, true);}
+        ).delay(500).then(
+            function() {device.SET_CLAPS_DETECTION_STATUS(true);}
+        )
     }
 
-    getAllInformation(peripheral: noble.Peripheral): any {
-        var device = this;
-        device.GET_STUFF(peripheral, "GET_GAME_MDOE");
-        device.GET_STUFF(peripheral, "GET_CHEST_RGB_LED");
-        device.GET_STUFF(peripheral, "GET_HEAD_LED");
-        device.GET_STUFF(peripheral, "GET_ODEMETER");
-        device.GET_STUFF(peripheral, "GET_RADAR_MODE");
-        device.GET_STUFF(peripheral, "GET_DETECTION_MODE");
-        device.GET_STUFF(peripheral, "GET_IR_REMOTE_ONOFF");
-        device.GET_STUFF(peripheral, "GET_CLAPS_DETECTION_STATUS");
-        device.GET_STUFF(peripheral, "GET_USER_DATA");
-        device.GET_STUFF(peripheral, "GET_SOFTWARE_VERSION");
-        device.GET_STUFF(peripheral, "GET_HARDWARE_VERSION");
-    }
+    
 
-    receive(peripheral: noble.Peripheral): any {
+    receive(): any {
         var device = this;
         
         device.ReceiveDataCharac.notify(true);
@@ -162,8 +163,11 @@ class Device {
                 
             } else if (convert[0] == device.commands["GET_ODEMETER"]) {
                 console.log("print odometer");
-                console.log(data[1]);
-                console.log(convert[1]);
+                var value = 0;
+                for (var i = 1; i <= 4; i++) {
+                    value += data[i] * Math.pow(256, 4-i);
+                }
+                console.log(value);
                 
             } else if (convert[0] == device.commands["GET_GESTURE_MODE"]) {
                 console.log("print gesture detected");
@@ -187,6 +191,7 @@ class Device {
                 } else if (convert[1] == 3) {
                     console.log("see object within 10 cm");
                 }
+                device.obstacle = convert[1];
             } else if (convert[0] == device.commands["GET_DETECTION_MODE"]) {
                 console.log("print detection mode");
                 console.log("detection on " + convert[1]);
@@ -216,21 +221,16 @@ class Device {
             } else if (convert[0] == device.commands["GET_HARDWARE_VERSION"]) {
                 console.log("print hardware version");
                 console.log({"voice_chip": convert[1], "hardware_version": convert[2]});
+            } else if (convert[0] == device.commands["GET_MIP_DETECTION_MODE"]) {
+                console.log("print detected");
+                console.log("detect" + convert[1]);
             }
             console.log(convert);
             device.received = true;
 		});
     }
 
-    listCommands(): void {
-        var command_code = Object.keys(this.commands);
-
-        for (var i = 0; i < command_code.length; i++) {
-            console.log(i + ": " command_code[i]);
-        }
-    }
-
-    giveCommands(peripheral: noble.Peripheral, args: number[]): any {
+    giveCommands(args: number[]): any {
         var device = this;
 
         var data = new Buffer(args.length);
@@ -246,16 +246,64 @@ class Device {
     }    
 
 
-    GET_STUFF(peripheral: noble.Peripheral, type: String): any {
+    promiseReadDataFromCharacteristic(service: noble.Service): any {
+        var device = this;
+        return new Promise(function (resolve: () => void, reject: any) {
+            service.discoverCharacteristics([], function(error, charateristics){
+                charateristics.forEach(function(charac: noble.Characteristic) {
+                    if (charac.uuid.toUpperCase() == Device.SEND_DATA_UUID.toUpperCase()) {
+                        device.SendDataCharac = charac;
+                    } else if (charac.uuid.toUpperCase() == Device.RECEIVE_DATA_UUID.toUpperCase()) {
+                        device.ReceiveDataCharac = charac;    
+                    } else if (charac.uuid.toUpperCase() == Device.BATTERY_LEVEL_UUID.toUpperCase()) {
+                        device.BatteryLevelCharac = charac;
+                    }
+                });
+                resolve();
+            });
+        });
+    }
+
+    GET_ALL_INFO(): any {
+        var device = this;
+        
+        function task(callback: any, command: String) {
+            device.GET_STUFF(command);
+            setTimeout(function() {
+                callback();
+            }, 50);
+            
+        };
+       
+       function executeTasks() {
+            var commands = Array.prototype.concat.apply([], arguments);
+            var command = commands.shift();
+            task(function() {
+                if(commands.length > 0)
+                    executeTasks.apply(this, commands);
+            }, command);
+        };
+
+        executeTasks("GET_GAME_MDOE", "GET_CHEST_RGB_LED", "GET_HEAD_LED", "GET_ODEMETER", "GET_RADAR_MODE", "GET_DETECTION_MODE", "GET_IR_REMOTE_ONOFF", "GET_CLAPS_DETECTION_STATUS", "GET_USER_DATA", "GET_SOFTWARE_VERSION", "GET_HARDWARE_VERSION");
+
+    }
+
+    GET_STUFF(type: String): any {
         var device = this;
         var value = device.commands[type];
 
-        device.giveCommands(peripheral, [value]);
+        device.giveCommands([value]);
     }
 
+    SHOULD_DISCONNECT_APP_MODE() {
+        var device = this;
+        console.log("disconnect app");
+        device.giveCommands([device.commands["SHOULD_DISCONNECT_APP_MODE"]]);
+        device.GET_STUFF("GET_GAME_MDOE");
+    }
 
     // volume level: 0-7
-    SET_VOLUME_LEVEL(peripheral: noble.Peripheral, level: number): any {
+    SET_VOLUME_LEVEL(level: number): any {
         var device = this;
         if (typeof(level) != "number") {
                 throw new DeviceError(DeviceError.INVALID_ARGUMENT, "invalid argument");
@@ -267,11 +315,11 @@ class Device {
             level = 7;
         }
         console.log("set volume");
-        device.giveCommands(peripheral, [device.commands["SET_VOLUME_LEVEL"], level]);
-        device.GET_STUFF(peripheral, "GET_VOLUME_LEVEL");
+        device.giveCommands([device.commands["SET_VOLUME_LEVEL"], level]);
+        device.GET_STUFF("GET_VOLUME_LEVEL");
     }
 
-    PLAY_SOUND(peripheral: noble.Peripheral, file: number, time: number): any {
+    PLAY_SOUND(file: number, time: number): any {
         var device = this;
 
         file = parseInt(file);
@@ -294,72 +342,69 @@ class Device {
             time = 256;
         }
         console.log("play sound");
-        device.giveCommands(peripheral, [device.commands["PLAY_SOUND"], file, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, time]);
+        device.giveCommands([device.commands["PLAY_SOUND"], file, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, time-1]);
     
     }
-    
-    DRIVE_FIXED(peripheral: noble.Peripheral, distanceInCm: number, degree: number): any {
+    // queued up for multiple commands (up to 20)
+    DRIVE_FIXED_DISTANCE(distanceInCm: number, degree: number): any {
         var device = this;
 
-        var direction = (distanceInCm > 0) ? this.constants["DRIVE_DIRECTION"]["FORWARD"] : this.constants["DRIVE_DIRECTION"]["BACKWARD"];
+        var direction = (distanceInCm > 0) ? device.constants["DRIVE_DIRECTION"]["FORWARD"] : device.constants["DRIVE_DIRECTION"]["BACKWARD"];
 	    var distance = Math.round(Math.abs(distanceInCm));
-	    var turn = (degree < 0) ? this.constants["DRIVE_DIRECTION"]["TURN_CLOCKWISE"] : this.constants["DRIVE_DIRECTION"]["TURN_ANTI_CLOCKWISE"];
+	    var turn = (degree < 0) ? device.constants["DRIVE_DIRECTION"]["TURN_CLOCKWISE"] : device.constants["DRIVE_DIRECTION"]["TURN_ANTI_CLOCKWISE"];
 	    var angle1 = Math.round(Math.abs(degree)) >> 8;
 	    var angle2 = Math.round(Math.abs(degree)) & 0x00ff;
         console.log("drive fixed distance")
-        device.giveCommands(peripheral, [device.commands["DRIVE_FIXED_DISTANCE"], direction, distance, turn, angle1, angle2]);
+        device.giveCommands([device.commands["DRIVE_FIXED_DISTANCE"], direction, distance, turn, angle1, angle2]);
     }
 
-    DRIVE_TIME(peripheral: noble.Peripheral, backward: boolean, speed: number, time: number): any {
+    DRIVE_TIME(backward: boolean, speed: number, time: number): any {
         var device = this;
 
         var direction = 113;
         if (backward) {
             direction = 114;
         }
-        if (speed < 0) {
-            speed = 0;
-        } else if (speed > 30) {
-            speed = 30;
-        }
+        speed = Math.ceil(31 * speed / 100);
         if (time < 0) {
             time = 0;
         } else if (time > 255) {
             time = 255;
         }
         console.log("drive with time")
-        device.giveCommands(peripheral, [direction, speed, time]);
+        device.giveCommands([direction, speed, time]);
     }
-
-// Not working
-    DRIVE_CONTINUOUS(peripheral: noble.Peripheral, x: number, y: number): any {
+    // x: left and right, y: forward and backward
+    // need to be sent every 50 ms
+    DRIVE_CONTINUOUS(x: number, y: number): any {
         var device = this;
-        var driveValue = Math.round(Math.min(1, Math.abs(y)) * 32);
-	    var turnValue = Math.round(Math.min(1, Math.abs(x)) * 32);
+        var driveValue = Math.round(Math.min(100, Math.abs(y)) * 32 / 100);
+	    var turnValue = Math.round(Math.min(100, Math.abs(x)) * 32 / 100);
 	
 	    driveValue += (y > 0) ? device.constants["DRIVE_CONTINOUS_VALUE"]["FW_SPEED1"] : device.constants["DRIVE_CONTINOUS_VALUE"]["BW_SPEED1"];
 	    turnValue += (x > 0) ? device.constants["DRIVE_CONTINOUS_VALUE"]["RIGHT_SPEED1"] : device.constants["DRIVE_CONTINOUS_VALUE"]["LEFT_SPEED1"];
         console.log(driveValue + " " + turnValue + device.commands["DRIVE_CONTINOUS"]);
         console.log("drive continuously");
-        device.giveCommands(peripheral, [device.commands["DRIVE_CONTINOUS"], driveValue, turnValue]);
+        device.giveCommands([device.commands["DRIVE_CONTINOUS"], driveValue, turnValue]);
 
     }
-// Not working
-    DRIVE_CONTINUOUS_CRAZY(peripheral: noble.Peripheral, x: number, y: number): any {
+    // x: left and right, y: forward and backward
+    // need to be sent every 50 ms
+    DRIVE_CONTINUOUS_CRAZY(x: number, y: number): any {
         var device = this;
-        var driveValue = Math.round(Math.min(1, Math.abs(y)) * 32);
-	    var turnValue = Math.round(Math.min(1, Math.abs(x)) * 32);
+        var driveValue = Math.round(Math.min(100, Math.abs(y)) * 32 / 100);
+	    var turnValue = Math.round(Math.min(100, Math.abs(x)) * 32 / 100);
 	
 	    driveValue += (y > 0) ? device.constants["DRIVE_CONTINOUS_CRAZY_VALUE"]["FW_SPEED1"] : device.constants["DRIVE_CONTINOUS_CRAZY_VALUE"]["BW_SPEED1"];
 	    turnValue += (x > 0) ? Math.min(device.constants["DRIVE_CONTINOUS_CRAZY_VALUE"]["RIGHT_SPEED1"], 223) : device.constants["DRIVE_CONTINOUS_CRAZY_VALUE"]["LEFT_SPEED1"];
         console.log(turnValue);
         console.log("drive continuously");
-        device.giveCommands(peripheral, [device.commands["DRIVE_CONTINOUS"], driveValue, turnValue]);
+        device.giveCommands([device.commands["DRIVE_CONTINOUS"], driveValue, turnValue]);
 
     }
 
 // Set Mip to fall down to front or back;
-    SET_FALL_POSITION(peripheral: noble.Peripheral, front: boolean): any {
+    SHOULD_FALLOVER(front: boolean): any {
         var device = this;
 
         var face = 0;
@@ -367,11 +412,11 @@ class Device {
             face = 1;
         }
         console.log("set position");
-        device.giveCommands(peripheral, [device.commands["SHOULD_FALLOVER"], face]);
+        device.giveCommands([device.commands["SHOULD_FALLOVER"], face]);
     }
 
     // Mip will attempt to get up from front or back if angle is correct
-    GET_UP(peripheral: noble.Peripheral, front: boolean, back: boolean): any {
+    GET_UP(front: boolean, back: boolean): any {
         var device = this;
 
         var direction = 0;
@@ -384,10 +429,10 @@ class Device {
             direction = 1;
         }
         console.log("get up");
-        device.giveCommands(peripheral, [device.commands["GET_UP_FROM_POSITION"], direction]);
+        device.giveCommands([device.commands["GET_UP_FROM_POSITION"], direction]);
     }
 
-    TURN(peripheral: noble.Peripheral, right: boolean, angle: number, speed: number): any {
+    TURN(right: boolean, angle: number, speed: number): any {
         var device = this;
 
         var direction = 115;
@@ -396,17 +441,13 @@ class Device {
         }
 
         angle = angle / 5;
-
-        if (speed < 0) {
-            speed = 0;
-        } else if (speed > 24) {
-            speed = 24;
-        }
+        speed = Math.ceil(25 * speed / 100);
+    
         console.log("turn");
-        device.giveCommands(peripheral, [direction, angle, speed]);
+        device.giveCommands([direction, angle, speed]);
     } 
 
-    SET_CHEST_RGB_LED(peripheral: noble.Peripheral, red: number, green: number, blue: number) {
+    SET_CHEST_RGB_LED(red: number, green: number, blue: number) {
         var device = this;
 
         if (red < 0) {
@@ -425,12 +466,12 @@ class Device {
             blue = 255;
         }
         console.log("change chest light");
-        device.giveCommands(peripheral, [device.commands["SET_CHEST_RGB_LED"], red, green, blue]);
-        device.GET_STUFF(peripheral, "GET_CHEST_RGB_LED");
+        device.giveCommands([device.commands["SET_CHEST_RGB_LED"], red, green, blue]);
+        device.GET_STUFF("GET_CHEST_RGB_LED");
     }
 
     // onTime and offTime in ms
-    FLASH_CHEST_RGB_LED(peripheral: noble.Peripheral, red: number, green: number, blue: number, onTime: number, offTime: number) {
+    FLASH_CHEST_RGB_LED(red: number, green: number, blue: number, onTime: number, offTime: number) {
         var device = this;
 
         for (var i = 1; i < arguments.length; i++) {
@@ -442,11 +483,11 @@ class Device {
         }
        
         console.log("change chest light");
-        device.giveCommands(peripheral, [device.commands["FLASH_CHEST_RGB_LED"], red, green, blue, onTime / 20, offTime / 20]);        
+        device.giveCommands([device.commands["FLASH_CHEST_RGB_LED"], red, green, blue, onTime / 20, offTime / 20]);        
     }
 
-    //0=off, 1=on, 2=blink slow, 3=blink fast, 4=fade in
-    SET_HEAD_LED(peripheral: noble.Peripheral, light1: number, light2: number, light3: number, light4: number) {
+    //0=off, 1=on, 2=blink slow, 3=blink fast
+    SET_HEAD_LED(light1: number, light2: number, light3: number, light4: number) {
         var device = this;
         for (var i = 1; i < arguments.length; i++) {
             if (arguments[i] < 1) {
@@ -456,19 +497,19 @@ class Device {
             }
         }
         console.log("set head light");
-        device.giveCommands(peripheral, [device.commands["SET_HEAD_LED"], light1, light2, light3, light4]);        
-        device.GET_STUFF(peripheral, "GET_HEAD_LED");
+        device.giveCommands([device.commands["SET_HEAD_LED"], light1, light2, light3, light4]);        
+        device.GET_STUFF("GET_HEAD_LED");
     }
 
-    RESET_ODEMETER(peripheral: noble.Peripheral) {
+    RESET_ODEMETER() {
         var device = this;
         console.log("reset odometer");
-        device.giveCommands(peripheral, [device.commands["RESET_ODEMETER"]]);
-        device.GET_STUFF(peripheral, "GET_ODEMETER");
+        device.giveCommands([device.commands["RESET_ODEMETER"]]);
+        device.GET_STUFF("GET_ODEMETER");
     }
 
     // either gesture mode or radar mode can be turn on
-    SET_GESTURE_RADAR_MODE(peripheral: noble.Peripheral, gesture: boolean, radar: boolean) {
+    SET_GESTURE_RADAR_MODE(gesture: boolean, radar: boolean) {
         var device = this;
         var value = 0;
         if (gesture) {
@@ -480,13 +521,13 @@ class Device {
         } else {
             console.log("disable gesture and radar");
         }
-        device.giveCommands(peripheral, [device.commands["SET_GESTURE_RADAR_MODE"], value]);
-        device.GET_STUFF(peripheral, "GET_RADAR_MODE");
+        device.giveCommands([device.commands["SET_GESTURE_RADAR_MODE"], value]);
+        device.GET_STUFF("GET_RADAR_MODE");
     }
 
     // Tu turn off dection mode, pass id with 0
     // IR Tx power (1~120) (about 1~300 cm)
-    SET_DETECTION_MODE(peripheral: noble.Peripheral, id: number, power: number) {
+    SET_MIP_DETECTION_MODE(id: number, power: number) {
         var device = this;
         if (id < 0) {
             id = 0;
@@ -499,32 +540,32 @@ class Device {
             id = 120;
         }
         console.log("set dection mode");
-        device.giveCommands(peripheral, [device.commands["SET_DETECTION_MODE"], id, power]);
-        device.GET_STUFF(peripheral, "GET_DETECTION_MODE");
+        device.giveCommands([device.commands["SET_MIP_DETECTION_MODE"], id, power]);
+        device.GET_STUFF("GET_MIP_DETECTION_MODE");
     }
 
-    SET_IR_REMOTE_ONOFF(peripheral: noble.Peripheral, on: boolean) {
+    SET_IR_REMOTE_ONOFF(on: boolean) {
         var device = this;
         var value = 0;
         if (on) {
             value = 1;
         }
         console.log("set IR remote");
-        device.giveCommands(peripheral, [device.commands["SET_IR_REMOTE_ONOFF"], value]);
-        device.GET_STUFF(peripheral, "GET_IR_REMOTE_ONOFF");
+        device.giveCommands([device.commands["SET_IR_REMOTE_ONOFF"], value]);
+        device.GET_STUFF("GET_IR_REMOTE_ONOFF");
     }
 
-    SET_CLAPS_DETECTION_STATUS(peripheral: noble.Peripheral, on: boolean) {
+    SET_CLAPS_DETECTION_STATUS(on: boolean) {
         var device = this;
         var value = 0;
         if (on) {
             value = 1;
         }
         console.log("set clap dection");
-        device.giveCommands(peripheral, [device.commands["SET_CLAPS_DETECTION_STATUS"], value]);
+        device.giveCommands([device.commands["SET_CLAPS_DETECTION_STATUS"], value]);
     }
     // set delay time between two claps
-    SET_CLAPS_DETECTION_TIMING(peripheral: noble.Peripheral, time: number) {
+    SET_CLAPS_DETECTION_TIMING(time: number) {
         var device = this;
         var high = 0;
         var low = time;
@@ -533,44 +574,27 @@ class Device {
             low = time - 255;   
         } 
         console.log("set delay time between two claps");
-        device.giveCommands(peripheral, [device.commands["SET_CLAPS_DETECTION_TIMING"], high, low]);
-        device.GET_STUFF(peripheral, "GET_CLAPS_DETECTION_STATUS");
+        device.giveCommands([device.commands["SET_CLAPS_DETECTION_TIMING"], high, low]);
+        device.GET_STUFF("GET_CLAPS_DETECTION_STATUS");
     }
 
-    STOP(peripheral: noble.Peripheral) {
+    STOP() {
         var device = this;
 
         console.log("stop");
-        device.giveCommands(peripheral, [device.commands["STOP"]]);
+        device.giveCommands([device.commands["STOP"]]);
     }
 
 // not ready for tickle
 //"APP": 1, "CAGE": 2, "TRACKING": 3, "DANCE": 4, "DEFAULT": 5, "STACK": 6, "TRICK": 7, "ROAM": 8
-    SET_GAME_MODE(peripheral: noble.Peripheral, option: number): any {
+    SET_GAME_MODE(option: number): any {
         var device = this;
 
         console.log("set mode");
-        device.giveCommands(peripheral, [device.commands["SET_GAME_MODE"], option]);
-        device.GET_STUFF(peripheral, "GET_GAME_MDOE");
+        device.giveCommands([device.commands["SET_GAME_MODE"], option]);
+        device.GET_STUFF("GET_GAME_MDOE");
     }
     
-    promiseReadDataFromCharacteristic(peripheral: noble.Peripheral, service: noble.Service): any {
-        var device = this;
-        return new Promise(function (resolve: () => void, reject: any) {
-            service.discoverCharacteristics([], function(error, charateristics){
-                charateristics.forEach(function(charac: noble.Characteristic) {
-                    if (charac.uuid.toUpperCase() == Device.SEND_DATA_UUID.toUpperCase()) {
-                        device.SendDataCharac = charac;
-                    } else if (charac.uuid.toUpperCase() == Device.RECEIVE_DATA_UUID.toUpperCase()) {
-                        device.ReceiveDataCharac = charac;    
-                    } else if (charac.uuid.toUpperCase() == Device.BATTERY_LEVEL_UUID.toUpperCase()) {
-                        device.BatteryLevelCharac = charac;
-                    }
-                });
-                resolve();
-            });
-        });
-    }
 
 
     /**
@@ -579,7 +603,7 @@ class Device {
      * @param success {function} The success callback. Will pass with a device instance corresponding to the peripheral
      * @param failed {function} The failed callback. Will pass with the original peripheral and the error code.
      */
-    static deviceWithPeripheral = function (peripheral: noble.Peripheral, success: (device: Device) => void, failed: (peripheral: noble.Peripheral, code: number) => void) {
+    static deviceWithPeripheral = function (peripheral: noble.Peripheral, success: (device: Device) => void, failed: (code: number) => void) {
         console.log("getting peripheral: " + peripheral);
         console.log("advertisement: " + peripheral.advertisement);
         var localName = peripheral.advertisement['localName'];
@@ -592,26 +616,26 @@ class Device {
         peripheral.discoverServices(Device.supportedServices, function (error: string, services: noble.Service[]) {
             console.log("discover services with count: " + services.length);
             if (services.length < Device.supportedServices.length) {
-                failed(peripheral, DeviceError.SERVICE_NOT_MATCHED);
+                failed(DeviceError.SERVICE_NOT_MATCHED);
             }
             var promises: any[] = [];
             services.forEach(function (service: noble.Service) {
                 console.log("discover service with uuid: " + service.uuid);
-                promises.push(device.promiseReadDataFromCharacteristic(peripheral, service));
+                promises.push(device.promiseReadDataFromCharacteristic(service));
             });
             console.log("promises: ${promises}");
             promise.all(promises)
             .then(function () {
                 if (device.isReady()) {
                     device.paired = true;
-                    device.initialize(peripheral);
+                    device.initialize();
                     success(device);
                 }
                 else {
-                    failed(peripheral, DeviceError.CHARACTERISTIC_NOT_MATCHED);
+                    failed(DeviceError.CHARACTERISTIC_NOT_MATCHED);
                 }
             }).catch(function() {
-                failed(peripheral, DeviceError.CHARACTERISTIC_NOT_MATCHED);
+                failed(DeviceError.CHARACTERISTIC_NOT_MATCHED);
             });
         });
     }
@@ -626,44 +650,5 @@ class Device {
         }
     }
 }
-
-    noble.on(`stateChange`, function (state: String): void {
-        console.log("state changed with value: " + state);
-        if (state == 'poweredOn') {
-            console.log('start scanning!');
-            noble.startScanning(Device.SERVICE_UUID);
-        } else {
-            noble.stopScanning();
-        }
-    });
-	
-	noble.on(`discover`, function (peripheral: noble.Peripheral): void {
-        if (Device.getProductId(peripheral) != Device.PRODUCT_ID) {
-            return;
-        };
-
-        var localName = peripheral.advertisement['localName'];
-        console.log('Got device: ' + localName);
-        var device = new Device(peripheral);
-        device.name = localName;
-        //device.successConnectedCallback = 'success';
-        peripheral.connect(function (error: String) {
-            if (error != undefined) {
-                console.log(peripheral.uuid + " RSSI: " + peripheral.rssi + " Connecting, Error : " + error);
-            } else {
-                console.log(peripheral.uuid + " RSSI: " + peripheral.rssi);
-                console.log('connected to peripheral: ' + peripheral.uuid);
-                Device.deviceWithPeripheral(peripheral, function(device: Device){
-                    console.log("success");
-                    setTimeout(function() {
-                        device.DRIVE_CONTINUOUS_CRAZY(peripheral, 1, 1);
-                            //device.getAllInformation(peripheral);
-                    }, 1000);
-                }, 
-                    function(peripheral: noble.Peripheral, error: number) {
-                    throw new DeviceError(error, "fail to connect");
-                });
-            }
-
-        });
-    });
+module.exports.Device = Device;
+module.exports.DeviceError = DeviceError;

@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "async": "^2.0.1",
     "events": "^1.1.1",
     "noble": "^1.6.0",
     "q": "^1.4.1"

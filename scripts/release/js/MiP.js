@@ -1,5 +1,4 @@
 "use strict";
-var noble = require('noble');
 var fs = require('fs');
 var promise = require('bluebird');
 var readline = require('readline');
@@ -41,6 +40,7 @@ var Device = (function () {
         this.radar_mode = false;
         this.MiPstatus = null;
         this.MiPweight = null;
+        this.obstacle = 0;
         this.constants = JSON.parse(fs.readFileSync('../../constants.json', 'utf8'));
         this.commands = this.constants.COMMAND_CODE;
         this.received = false;
@@ -54,7 +54,7 @@ var Device = (function () {
     Device.prototype.toString = function () {
         return "MiP: " + this.name;
     };
-    Device.prototype.initialize = function (peripheral) {
+    Device.prototype.initialize = function () {
         var device = this;
         if (device.initialized) {
             console.log("already initialized");
@@ -62,25 +62,13 @@ var Device = (function () {
         }
         device.initialized = true;
         console.log('device initialized');
-        device.receive(peripheral);
-        var i = 0;
-        device.listCommands();
+        device.receive();
+        var p = new promise(function (resolve, reject) {
+            resolve();
+        });
+        p.delay(1000).then(function () { device.SET_IR_REMOTE_ONOFF(true); }).delay(500).then(function () { device.RESET_ODEMETER(); }).delay(500).then(function () { device.SET_VOLUME_LEVEL(4); }).delay(500).then(function () { device.SET_GESTURE_RADAR_MODE(false, true); }).delay(500).then(function () { device.SET_CLAPS_DETECTION_STATUS(true); });
     };
-    Device.prototype.getAllInformation = function (peripheral) {
-        var device = this;
-        device.GET_STUFF(peripheral, "GET_GAME_MDOE");
-        device.GET_STUFF(peripheral, "GET_CHEST_RGB_LED");
-        device.GET_STUFF(peripheral, "GET_HEAD_LED");
-        device.GET_STUFF(peripheral, "GET_ODEMETER");
-        device.GET_STUFF(peripheral, "GET_RADAR_MODE");
-        device.GET_STUFF(peripheral, "GET_DETECTION_MODE");
-        device.GET_STUFF(peripheral, "GET_IR_REMOTE_ONOFF");
-        device.GET_STUFF(peripheral, "GET_CLAPS_DETECTION_STATUS");
-        device.GET_STUFF(peripheral, "GET_USER_DATA");
-        device.GET_STUFF(peripheral, "GET_SOFTWARE_VERSION");
-        device.GET_STUFF(peripheral, "GET_HARDWARE_VERSION");
-    };
-    Device.prototype.receive = function (peripheral) {
+    Device.prototype.receive = function () {
         var device = this;
         device.ReceiveDataCharac.notify(true);
         device.ReceiveDataCharac.on("data", function (data, isNotification) {
@@ -117,8 +105,11 @@ var Device = (function () {
             }
             else if (convert[0] == device.commands["GET_ODEMETER"]) {
                 console.log("print odometer");
-                console.log(data[1]);
-                console.log(convert[1]);
+                var value = 0;
+                for (var i = 1; i <= 4; i++) {
+                    value += data[i] * Math.pow(256, 4 - i);
+                }
+                console.log(value);
             }
             else if (convert[0] == device.commands["GET_GESTURE_MODE"]) {
                 console.log("print gesture detected");
@@ -148,6 +139,7 @@ var Device = (function () {
                 else if (convert[1] == 3) {
                     console.log("see object within 10 cm");
                 }
+                device.obstacle = convert[1];
             }
             else if (convert[0] == device.commands["GET_DETECTION_MODE"]) {
                 console.log("print detection mode");
@@ -188,17 +180,15 @@ var Device = (function () {
                 console.log("print hardware version");
                 console.log({ "voice_chip": convert[1], "hardware_version": convert[2] });
             }
+            else if (convert[0] == device.commands["GET_MIP_DETECTION_MODE"]) {
+                console.log("print detected");
+                console.log("detect" + convert[1]);
+            }
             console.log(convert);
             device.received = true;
         });
     };
-    Device.prototype.listCommands = function () {
-        var command_code = Object.keys(this.commands);
-        for (var i = 0; i < command_code.length; i++) {
-            console.log(i + ": ", command_code[i]);
-        }
-    };
-    Device.prototype.giveCommands = function (peripheral, args) {
+    Device.prototype.giveCommands = function (args) {
         var device = this;
         var data = new Buffer(args.length);
         args.forEach(function (arg, i) {
@@ -210,12 +200,57 @@ var Device = (function () {
             }
         });
     };
-    Device.prototype.GET_STUFF = function (peripheral, type) {
+    Device.prototype.promiseReadDataFromCharacteristic = function (service) {
+        var device = this;
+        return new Promise(function (resolve, reject) {
+            service.discoverCharacteristics([], function (error, charateristics) {
+                charateristics.forEach(function (charac) {
+                    if (charac.uuid.toUpperCase() == Device.SEND_DATA_UUID.toUpperCase()) {
+                        device.SendDataCharac = charac;
+                    }
+                    else if (charac.uuid.toUpperCase() == Device.RECEIVE_DATA_UUID.toUpperCase()) {
+                        device.ReceiveDataCharac = charac;
+                    }
+                    else if (charac.uuid.toUpperCase() == Device.BATTERY_LEVEL_UUID.toUpperCase()) {
+                        device.BatteryLevelCharac = charac;
+                    }
+                });
+                resolve();
+            });
+        });
+    };
+    Device.prototype.GET_ALL_INFO = function () {
+        var device = this;
+        function task(callback, command) {
+            device.GET_STUFF(command);
+            setTimeout(function () {
+                callback();
+            }, 50);
+        }
+        ;
+        function executeTasks() {
+            var commands = Array.prototype.concat.apply([], arguments);
+            var command = commands.shift();
+            task(function () {
+                if (commands.length > 0)
+                    executeTasks.apply(this, commands);
+            }, command);
+        }
+        ;
+        executeTasks("GET_GAME_MDOE", "GET_CHEST_RGB_LED", "GET_HEAD_LED", "GET_ODEMETER", "GET_RADAR_MODE", "GET_DETECTION_MODE", "GET_IR_REMOTE_ONOFF", "GET_CLAPS_DETECTION_STATUS", "GET_USER_DATA", "GET_SOFTWARE_VERSION", "GET_HARDWARE_VERSION");
+    };
+    Device.prototype.GET_STUFF = function (type) {
         var device = this;
         var value = device.commands[type];
-        device.giveCommands(peripheral, [value]);
+        device.giveCommands([value]);
     };
-    Device.prototype.SET_VOLUME_LEVEL = function (peripheral, level) {
+    Device.prototype.SHOULD_DISCONNECT_APP_MODE = function () {
+        var device = this;
+        console.log("disconnect app");
+        device.giveCommands([device.commands["SHOULD_DISCONNECT_APP_MODE"]]);
+        device.GET_STUFF("GET_GAME_MDOE");
+    };
+    Device.prototype.SET_VOLUME_LEVEL = function (level) {
         var device = this;
         if (typeof (level) != "number") {
             throw new DeviceError(DeviceError.INVALID_ARGUMENT, "invalid argument");
@@ -227,10 +262,10 @@ var Device = (function () {
             level = 7;
         }
         console.log("set volume");
-        device.giveCommands(peripheral, [device.commands["SET_VOLUME_LEVEL"], level]);
-        device.GET_STUFF(peripheral, "GET_VOLUME_LEVEL");
+        device.giveCommands([device.commands["SET_VOLUME_LEVEL"], level]);
+        device.GET_STUFF("GET_VOLUME_LEVEL");
     };
-    Device.prototype.PLAY_SOUND = function (peripheral, file, time) {
+    Device.prototype.PLAY_SOUND = function (file, time) {
         var device = this;
         file = parseInt(file);
         if (typeof (file) != "number") {
@@ -250,30 +285,25 @@ var Device = (function () {
             time = 256;
         }
         console.log("play sound");
-        device.giveCommands(peripheral, [device.commands["PLAY_SOUND"], file, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, time]);
+        device.giveCommands([device.commands["PLAY_SOUND"], file, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, time - 1]);
     };
-    Device.prototype.DRIVE_FIXED = function (peripheral, distanceInCm, degree) {
+    Device.prototype.DRIVE_FIXED_DISTANCE = function (distanceInCm, degree) {
         var device = this;
-        var direction = (distanceInCm > 0) ? this.constants["DRIVE_DIRECTION"]["FORWARD"] : this.constants["DRIVE_DIRECTION"]["BACKWARD"];
+        var direction = (distanceInCm > 0) ? device.constants["DRIVE_DIRECTION"]["FORWARD"] : device.constants["DRIVE_DIRECTION"]["BACKWARD"];
         var distance = Math.round(Math.abs(distanceInCm));
-        var turn = (degree < 0) ? this.constants["DRIVE_DIRECTION"]["TURN_CLOCKWISE"] : this.constants["DRIVE_DIRECTION"]["TURN_ANTI_CLOCKWISE"];
+        var turn = (degree < 0) ? device.constants["DRIVE_DIRECTION"]["TURN_CLOCKWISE"] : device.constants["DRIVE_DIRECTION"]["TURN_ANTI_CLOCKWISE"];
         var angle1 = Math.round(Math.abs(degree)) >> 8;
         var angle2 = Math.round(Math.abs(degree)) & 0x00ff;
         console.log("drive fixed distance");
-        device.giveCommands(peripheral, [device.commands["DRIVE_FIXED_DISTANCE"], direction, distance, turn, angle1, angle2]);
+        device.giveCommands([device.commands["DRIVE_FIXED_DISTANCE"], direction, distance, turn, angle1, angle2]);
     };
-    Device.prototype.DRIVE_TIME = function (peripheral, backward, speed, time) {
+    Device.prototype.DRIVE_TIME = function (backward, speed, time) {
         var device = this;
         var direction = 113;
         if (backward) {
             direction = 114;
         }
-        if (speed < 0) {
-            speed = 0;
-        }
-        else if (speed > 30) {
-            speed = 30;
-        }
+        speed = Math.ceil(31 * speed / 100);
         if (time < 0) {
             time = 0;
         }
@@ -281,38 +311,38 @@ var Device = (function () {
             time = 255;
         }
         console.log("drive with time");
-        device.giveCommands(peripheral, [direction, speed, time]);
+        device.giveCommands([direction, speed, time]);
     };
-    Device.prototype.DRIVE_CONTINUOUS = function (peripheral, x, y) {
+    Device.prototype.DRIVE_CONTINUOUS = function (x, y) {
         var device = this;
-        var driveValue = Math.round(Math.min(1, Math.abs(y)) * 32);
-        var turnValue = Math.round(Math.min(1, Math.abs(x)) * 32);
+        var driveValue = Math.round(Math.min(100, Math.abs(y)) * 32 / 100);
+        var turnValue = Math.round(Math.min(100, Math.abs(x)) * 32 / 100);
         driveValue += (y > 0) ? device.constants["DRIVE_CONTINOUS_VALUE"]["FW_SPEED1"] : device.constants["DRIVE_CONTINOUS_VALUE"]["BW_SPEED1"];
         turnValue += (x > 0) ? device.constants["DRIVE_CONTINOUS_VALUE"]["RIGHT_SPEED1"] : device.constants["DRIVE_CONTINOUS_VALUE"]["LEFT_SPEED1"];
         console.log(driveValue + " " + turnValue + device.commands["DRIVE_CONTINOUS"]);
         console.log("drive continuously");
-        device.giveCommands(peripheral, [device.commands["DRIVE_CONTINOUS"], driveValue, turnValue]);
+        device.giveCommands([device.commands["DRIVE_CONTINOUS"], driveValue, turnValue]);
     };
-    Device.prototype.DRIVE_CONTINUOUS_CRAZY = function (peripheral, x, y) {
+    Device.prototype.DRIVE_CONTINUOUS_CRAZY = function (x, y) {
         var device = this;
-        var driveValue = Math.round(Math.min(1, Math.abs(y)) * 32);
-        var turnValue = Math.round(Math.min(1, Math.abs(x)) * 32);
+        var driveValue = Math.round(Math.min(100, Math.abs(y)) * 32 / 100);
+        var turnValue = Math.round(Math.min(100, Math.abs(x)) * 32 / 100);
         driveValue += (y > 0) ? device.constants["DRIVE_CONTINOUS_CRAZY_VALUE"]["FW_SPEED1"] : device.constants["DRIVE_CONTINOUS_CRAZY_VALUE"]["BW_SPEED1"];
         turnValue += (x > 0) ? Math.min(device.constants["DRIVE_CONTINOUS_CRAZY_VALUE"]["RIGHT_SPEED1"], 223) : device.constants["DRIVE_CONTINOUS_CRAZY_VALUE"]["LEFT_SPEED1"];
         console.log(turnValue);
         console.log("drive continuously");
-        device.giveCommands(peripheral, [device.commands["DRIVE_CONTINOUS"], driveValue, turnValue]);
+        device.giveCommands([device.commands["DRIVE_CONTINOUS"], driveValue, turnValue]);
     };
-    Device.prototype.SET_FALL_POSITION = function (peripheral, front) {
+    Device.prototype.SHOULD_FALLOVER = function (front) {
         var device = this;
         var face = 0;
         if (front) {
             face = 1;
         }
         console.log("set position");
-        device.giveCommands(peripheral, [device.commands["SHOULD_FALLOVER"], face]);
+        device.giveCommands([device.commands["SHOULD_FALLOVER"], face]);
     };
-    Device.prototype.GET_UP = function (peripheral, front, back) {
+    Device.prototype.GET_UP = function (front, back) {
         var device = this;
         var direction = 0;
         if (front && back) {
@@ -325,25 +355,20 @@ var Device = (function () {
             direction = 1;
         }
         console.log("get up");
-        device.giveCommands(peripheral, [device.commands["GET_UP_FROM_POSITION"], direction]);
+        device.giveCommands([device.commands["GET_UP_FROM_POSITION"], direction]);
     };
-    Device.prototype.TURN = function (peripheral, right, angle, speed) {
+    Device.prototype.TURN = function (right, angle, speed) {
         var device = this;
         var direction = 115;
         if (right) {
             direction = 116;
         }
         angle = angle / 5;
-        if (speed < 0) {
-            speed = 0;
-        }
-        else if (speed > 24) {
-            speed = 24;
-        }
+        speed = Math.ceil(25 * speed / 100);
         console.log("turn");
-        device.giveCommands(peripheral, [direction, angle, speed]);
+        device.giveCommands([direction, angle, speed]);
     };
-    Device.prototype.SET_CHEST_RGB_LED = function (peripheral, red, green, blue) {
+    Device.prototype.SET_CHEST_RGB_LED = function (red, green, blue) {
         var device = this;
         if (red < 0) {
             red = 0;
@@ -364,10 +389,10 @@ var Device = (function () {
             blue = 255;
         }
         console.log("change chest light");
-        device.giveCommands(peripheral, [device.commands["SET_CHEST_RGB_LED"], red, green, blue]);
-        device.GET_STUFF(peripheral, "GET_CHEST_RGB_LED");
+        device.giveCommands([device.commands["SET_CHEST_RGB_LED"], red, green, blue]);
+        device.GET_STUFF("GET_CHEST_RGB_LED");
     };
-    Device.prototype.FLASH_CHEST_RGB_LED = function (peripheral, red, green, blue, onTime, offTime) {
+    Device.prototype.FLASH_CHEST_RGB_LED = function (red, green, blue, onTime, offTime) {
         var device = this;
         for (var i = 1; i < arguments.length; i++) {
             if (arguments[i] < 0) {
@@ -378,9 +403,9 @@ var Device = (function () {
             }
         }
         console.log("change chest light");
-        device.giveCommands(peripheral, [device.commands["FLASH_CHEST_RGB_LED"], red, green, blue, onTime / 20, offTime / 20]);
+        device.giveCommands([device.commands["FLASH_CHEST_RGB_LED"], red, green, blue, onTime / 20, offTime / 20]);
     };
-    Device.prototype.SET_HEAD_LED = function (peripheral, light1, light2, light3, light4) {
+    Device.prototype.SET_HEAD_LED = function (light1, light2, light3, light4) {
         var device = this;
         for (var i = 1; i < arguments.length; i++) {
             if (arguments[i] < 1) {
@@ -391,16 +416,16 @@ var Device = (function () {
             }
         }
         console.log("set head light");
-        device.giveCommands(peripheral, [device.commands["SET_HEAD_LED"], light1, light2, light3, light4]);
-        device.GET_STUFF(peripheral, "GET_HEAD_LED");
+        device.giveCommands([device.commands["SET_HEAD_LED"], light1, light2, light3, light4]);
+        device.GET_STUFF("GET_HEAD_LED");
     };
-    Device.prototype.RESET_ODEMETER = function (peripheral) {
+    Device.prototype.RESET_ODEMETER = function () {
         var device = this;
         console.log("reset odometer");
-        device.giveCommands(peripheral, [device.commands["RESET_ODEMETER"]]);
-        device.GET_STUFF(peripheral, "GET_ODEMETER");
+        device.giveCommands([device.commands["RESET_ODEMETER"]]);
+        device.GET_STUFF("GET_ODEMETER");
     };
-    Device.prototype.SET_GESTURE_RADAR_MODE = function (peripheral, gesture, radar) {
+    Device.prototype.SET_GESTURE_RADAR_MODE = function (gesture, radar) {
         var device = this;
         var value = 0;
         if (gesture) {
@@ -414,10 +439,10 @@ var Device = (function () {
         else {
             console.log("disable gesture and radar");
         }
-        device.giveCommands(peripheral, [device.commands["SET_GESTURE_RADAR_MODE"], value]);
-        device.GET_STUFF(peripheral, "GET_RADAR_MODE");
+        device.giveCommands([device.commands["SET_GESTURE_RADAR_MODE"], value]);
+        device.GET_STUFF("GET_RADAR_MODE");
     };
-    Device.prototype.SET_DETECTION_MODE = function (peripheral, id, power) {
+    Device.prototype.SET_MIP_DETECTION_MODE = function (id, power) {
         var device = this;
         if (id < 0) {
             id = 0;
@@ -432,29 +457,29 @@ var Device = (function () {
             id = 120;
         }
         console.log("set dection mode");
-        device.giveCommands(peripheral, [device.commands["SET_DETECTION_MODE"], id, power]);
-        device.GET_STUFF(peripheral, "GET_DETECTION_MODE");
+        device.giveCommands([device.commands["SET_MIP_DETECTION_MODE"], id, power]);
+        device.GET_STUFF("GET_MIP_DETECTION_MODE");
     };
-    Device.prototype.SET_IR_REMOTE_ONOFF = function (peripheral, on) {
+    Device.prototype.SET_IR_REMOTE_ONOFF = function (on) {
         var device = this;
         var value = 0;
         if (on) {
             value = 1;
         }
         console.log("set IR remote");
-        device.giveCommands(peripheral, [device.commands["SET_IR_REMOTE_ONOFF"], value]);
-        device.GET_STUFF(peripheral, "GET_IR_REMOTE_ONOFF");
+        device.giveCommands([device.commands["SET_IR_REMOTE_ONOFF"], value]);
+        device.GET_STUFF("GET_IR_REMOTE_ONOFF");
     };
-    Device.prototype.SET_CLAPS_DETECTION_STATUS = function (peripheral, on) {
+    Device.prototype.SET_CLAPS_DETECTION_STATUS = function (on) {
         var device = this;
         var value = 0;
         if (on) {
             value = 1;
         }
         console.log("set clap dection");
-        device.giveCommands(peripheral, [device.commands["SET_CLAPS_DETECTION_STATUS"], value]);
+        device.giveCommands([device.commands["SET_CLAPS_DETECTION_STATUS"], value]);
     };
-    Device.prototype.SET_CLAPS_DETECTION_TIMING = function (peripheral, time) {
+    Device.prototype.SET_CLAPS_DETECTION_TIMING = function (time) {
         var device = this;
         var high = 0;
         var low = time;
@@ -463,38 +488,19 @@ var Device = (function () {
             low = time - 255;
         }
         console.log("set delay time between two claps");
-        device.giveCommands(peripheral, [device.commands["SET_CLAPS_DETECTION_TIMING"], high, low]);
-        device.GET_STUFF(peripheral, "GET_CLAPS_DETECTION_STATUS");
+        device.giveCommands([device.commands["SET_CLAPS_DETECTION_TIMING"], high, low]);
+        device.GET_STUFF("GET_CLAPS_DETECTION_STATUS");
     };
-    Device.prototype.STOP = function (peripheral) {
+    Device.prototype.STOP = function () {
         var device = this;
         console.log("stop");
-        device.giveCommands(peripheral, [device.commands["STOP"]]);
+        device.giveCommands([device.commands["STOP"]]);
     };
-    Device.prototype.SET_GAME_MODE = function (peripheral, option) {
+    Device.prototype.SET_GAME_MODE = function (option) {
         var device = this;
         console.log("set mode");
-        device.giveCommands(peripheral, [device.commands["SET_GAME_MODE"], option]);
-        device.GET_STUFF(peripheral, "GET_GAME_MDOE");
-    };
-    Device.prototype.promiseReadDataFromCharacteristic = function (peripheral, service) {
-        var device = this;
-        return new Promise(function (resolve, reject) {
-            service.discoverCharacteristics([], function (error, charateristics) {
-                charateristics.forEach(function (charac) {
-                    if (charac.uuid.toUpperCase() == Device.SEND_DATA_UUID.toUpperCase()) {
-                        device.SendDataCharac = charac;
-                    }
-                    else if (charac.uuid.toUpperCase() == Device.RECEIVE_DATA_UUID.toUpperCase()) {
-                        device.ReceiveDataCharac = charac;
-                    }
-                    else if (charac.uuid.toUpperCase() == Device.BATTERY_LEVEL_UUID.toUpperCase()) {
-                        device.BatteryLevelCharac = charac;
-                    }
-                });
-                resolve();
-            });
-        });
+        device.giveCommands([device.commands["SET_GAME_MODE"], option]);
+        device.GET_STUFF("GET_GAME_MDOE");
     };
     Device.PRODUCT_ID = 5;
     Device.UUID = '29b4ec3c21e040aba7db557d4cadc2a6';
@@ -526,26 +532,26 @@ var Device = (function () {
         peripheral.discoverServices(Device.supportedServices, function (error, services) {
             console.log("discover services with count: " + services.length);
             if (services.length < Device.supportedServices.length) {
-                failed(peripheral, DeviceError.SERVICE_NOT_MATCHED);
+                failed(DeviceError.SERVICE_NOT_MATCHED);
             }
             var promises = [];
             services.forEach(function (service) {
                 console.log("discover service with uuid: " + service.uuid);
-                promises.push(device.promiseReadDataFromCharacteristic(peripheral, service));
+                promises.push(device.promiseReadDataFromCharacteristic(service));
             });
             console.log("promises: ${promises}");
             promise.all(promises)
                 .then(function () {
                 if (device.isReady()) {
                     device.paired = true;
-                    device.initialize(peripheral);
+                    device.initialize();
                     success(device);
                 }
                 else {
-                    failed(peripheral, DeviceError.CHARACTERISTIC_NOT_MATCHED);
+                    failed(DeviceError.CHARACTERISTIC_NOT_MATCHED);
                 }
             }).catch(function () {
-                failed(peripheral, DeviceError.CHARACTERISTIC_NOT_MATCHED);
+                failed(DeviceError.CHARACTERISTIC_NOT_MATCHED);
             });
         });
     };
@@ -560,40 +566,5 @@ var Device = (function () {
     };
     return Device;
 }());
-noble.on("stateChange", function (state) {
-    console.log("state changed with value: " + state);
-    if (state == 'poweredOn') {
-        console.log('start scanning!');
-        noble.startScanning(Device.SERVICE_UUID);
-    }
-    else {
-        noble.stopScanning();
-    }
-});
-noble.on("discover", function (peripheral) {
-    if (Device.getProductId(peripheral) != Device.PRODUCT_ID) {
-        return;
-    }
-    ;
-    var localName = peripheral.advertisement['localName'];
-    console.log('Got device: ' + localName);
-    var device = new Device(peripheral);
-    device.name = localName;
-    peripheral.connect(function (error) {
-        if (error != undefined) {
-            console.log(peripheral.uuid + " RSSI: " + peripheral.rssi + " Connecting, Error : " + error);
-        }
-        else {
-            console.log(peripheral.uuid + " RSSI: " + peripheral.rssi);
-            console.log('connected to peripheral: ' + peripheral.uuid);
-            Device.deviceWithPeripheral(peripheral, function (device) {
-                console.log("success");
-                setTimeout(function () {
-                    device.DRIVE_CONTINUOUS_CRAZY(peripheral, 1, 1);
-                }, 1000);
-            }, function (peripheral, error) {
-                throw new DeviceError(error, "fail to connect");
-            });
-        }
-    });
-});
+module.exports.Device = Device;
+module.exports.DeviceError = DeviceError;
