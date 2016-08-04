@@ -66,7 +66,7 @@ var Device = (function () {
         var p = new promise(function (resolve, reject) {
             resolve();
         });
-        p.delay(1000).then(function () { device.SET_IR_REMOTE_ONOFF(true); }).delay(500).then(function () { device.RESET_ODEMETER(); }).delay(500).then(function () { device.SET_VOLUME_LEVEL(4); }).delay(500).then(function () { device.SET_GESTURE_RADAR_MODE(false, true); }).delay(500).then(function () { device.SET_CLAPS_DETECTION_STATUS(true); });
+        p.delay(1000).then(function () { device.SET_IR_REMOTE_ONOFF(true); }).delay(500).then(function () { device.RESET_ODOMETER(); }).delay(500).then(function () { device.SET_VOLUME_LEVEL(4); }).delay(500).then(function () { device.SET_GESTURE_RADAR_MODE(false, true); }).delay(500).then(function () { device.SET_CLAPS_DETECTION_STATUS(true); });
     };
     Device.prototype.receive = function () {
         var device = this;
@@ -103,12 +103,13 @@ var Device = (function () {
                 console.log("0=off, 1=on, 2=blink slow, 3=blink fast, 4=fade in");
                 console.log("light1: " + convert[1] + " light2: " + convert[2] + " light3: " + convert[3] + " light4: " + convert[4]);
             }
-            else if (convert[0] == device.commands["GET_ODEMETER"]) {
+            else if (convert[0] == device.commands["GET_ODOMETER"]) {
                 console.log("print odometer");
                 var value = 0;
                 for (var i = 1; i <= 4; i++) {
-                    value += data[i] * Math.pow(256, 4 - i);
+                    value += convert[i] * Math.pow(256, 4 - i);
                 }
+                value = value / 48.5;
                 console.log(value);
             }
             else if (convert[0] == device.commands["GET_GESTURE_MODE"]) {
@@ -237,7 +238,7 @@ var Device = (function () {
             }, command);
         }
         ;
-        executeTasks("GET_GAME_MDOE", "GET_CHEST_RGB_LED", "GET_HEAD_LED", "GET_ODEMETER", "GET_RADAR_MODE", "GET_DETECTION_MODE", "GET_IR_REMOTE_ONOFF", "GET_CLAPS_DETECTION_STATUS", "GET_USER_DATA", "GET_SOFTWARE_VERSION", "GET_HARDWARE_VERSION");
+        executeTasks("GET_GAME_MDOE", "GET_CHEST_RGB_LED", "GET_HEAD_LED", "GET_ODOMETER", "GET_RADAR_MODE", "GET_DETECTION_MODE", "GET_IR_REMOTE_ONOFF", "GET_CLAPS_DETECTION_STATUS", "GET_USER_DATA", "GET_SOFTWARE_VERSION", "GET_HARDWARE_VERSION");
     };
     Device.prototype.GET_STUFF = function (type) {
         var device = this;
@@ -419,11 +420,10 @@ var Device = (function () {
         device.giveCommands([device.commands["SET_HEAD_LED"], light1, light2, light3, light4]);
         device.GET_STUFF("GET_HEAD_LED");
     };
-    Device.prototype.RESET_ODEMETER = function () {
+    Device.prototype.RESET_ODOMETER = function () {
         var device = this;
         console.log("reset odometer");
-        device.giveCommands([device.commands["RESET_ODEMETER"]]);
-        device.GET_STUFF("GET_ODEMETER");
+        device.giveCommands([device.commands["RESET_ODOMETER"]]);
     };
     Device.prototype.SET_GESTURE_RADAR_MODE = function (gesture, radar) {
         var device = this;
@@ -478,6 +478,7 @@ var Device = (function () {
         }
         console.log("set clap dection");
         device.giveCommands([device.commands["SET_CLAPS_DETECTION_STATUS"], value]);
+        device.GET_STUFF("GET_CLAPS_DETECTION_STATUS");
     };
     Device.prototype.SET_CLAPS_DETECTION_TIMING = function (time) {
         var device = this;

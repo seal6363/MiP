@@ -11,43 +11,50 @@ var valid_commands = [
                             ["GET_ALL_INFO"],
                             ["SHOULD_DISCONNECT_APP_MODE"],
                             ["SET_VOLUME_LEVEL", 7], 
-                            ["PLAY_SOUND", 2, 1], 
+                            ["PLAY_SOUND", 78, 1], 
                             ["DRIVE_FIXED_DISTANCE", 30, 0],
+                            ["DRIVE_FIXED_DISTANCE", -30, 0],
                             ["DRIVE_TIME", false, 60, 10000], 
                             ["DRIVE_CONTINUOUS", 30, 30], 
                             ["SHOULD_FALLOVER", true], 
                             ["GET_UP", true, true],
                             ["TURN", false, 90, 100],
                             ["SET_CHEST_RGB_LED", 66, 66, 66],
-                            ["FLASH_CHEST_RGB_LED", 77, 77, 77, 5, 5],
+                            ["FLASH_CHEST_RGB_LED", 77, 77, 77, 1000, 500],
                             ["SET_HEAD_LED", 2, 3, 2, 3],
-                            ["RESET_ODEMETER"], 
+                            ["RESET_ODOMETER"], 
                             ["SET_GESTURE_RADAR_MODE", false, true],
+                            ["SET_CLAPS_DETECTION_STATUS", true],
+                            ["SET_CLAPS_DETECTION_TIMING", 1000],
                             ["STOP"]
                             ];
 var command_functions = null;
 var command_queue = [];
-
 function listCommands() {
+        console.log("------------LIST COMMNANDS--------------");
         for (var i = 0; i < valid_commands.length; i++) {
             console.log(i + ": " + valid_commands[i][0]);
         }
+        console.log("----------------------------------------");
 }
  
 
 function requestCommands() {
+        listCommands();
         rl.question("which one: ", function(ans) {
             var selectedOption = valid_commands[ans];
             if (selectedOption != null) {
                 console.log("valid option");
                 command_queue.push(selectedOption);
             } else {
-                throw new DeviceError(DeviceError.INVALID_ARGUMENT, "invalid argument");
+                console.log("invalid option");
+                //throw new DeviceError(DeviceError.INVALID_ARGUMENT, "invalid argument");
             }
             requestCommands();
         });
         
 }
+
 
 function processCommands(device) {
     setInterval(function() {
@@ -88,9 +95,6 @@ function processCommands(device) {
                 command_functions = Object.getPrototypeOf(device);
                 Device.deviceWithPeripheral(peripheral, function(device){
                     setTimeout(function() {
-                        console.log("------------LIST COMMNANDS--------------");
-                        listCommands();
-                        console.log("----------------------------------------");
                         requestCommands();
                         processCommands(device);
                     }, 4000);
